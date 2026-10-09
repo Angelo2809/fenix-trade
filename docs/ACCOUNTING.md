@@ -16,6 +16,12 @@ Cada conta representa uma mesa/contrato independente. Capital inicial é limite 
 | Margem até a perda | max(0, limite + saldo); zero se perdida |
 | Resultado / limite | Resultado acumulado ÷ limite × 100 |
 | Drawdown absoluto | Maior recuo do resultado acumulado desde um pico |
+
+## Taxas e mudança de fase
+
+Cada conta configura quatro taxas por contrato executado: WIN e WDO na construção de margem, e WIN e WDO na conta real. A taxa incide em cada lado, portanto o custo da operação é `(Qtd Compra + Qtd Venda) × taxa`. Ativos que não começam com `WIN` ou `WDO` não recebem uma taxa automática.
+
+A construção termina quando o resultado líquido acumulado das operações alcança o capital contratado. A operação que cruza o limite ainda usa a taxa de construção; todas as operações posteriores usam a taxa de conta real, mesmo que o resultado volte a cair. Ajustes manuais de fechamento não antecipam essa mudança, pois a fase é apurada pelas operações do CSV.
 | Drawdown percentual | −drawdown absoluto ÷ limite × 100 |
 
 Dinheiro usa Decimal e arredondamento `ROUND_HALF_EVEN` em centavos. O preview do navegador é indicativo; a gravação sempre recalcula no backend. “Resultado / limite” é uma razão operacional, não TWR, IRR, retorno anualizado ou rentabilidade de dinheiro desembolsado.

@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, date, timezone
 from decimal import Decimal
 from sqlalchemy import String, Text, Numeric, ForeignKey, UniqueConstraint, JSON
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .db import Base
 
 
@@ -65,15 +65,31 @@ class AuditLog(Base):
     details: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
+class ProprietaryDesk(Base):
+    __tablename__ = "proprietary_desks"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    name: Mapped[str] = mapped_column(String(120))
+    normalized_name: Mapped[str] = mapped_column(String(160), unique=True)
+
+
 class InvestmentAccount(Base):
     __tablename__ = "investment_accounts"
+    __table_args__ = (UniqueConstraint("account_number_normalized", "identity_scope", name="uq_account_scope"),)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     account_number: Mapped[str] = mapped_column(String(100))
-    account_number_normalized: Mapped[str] = mapped_column(String(100), unique=True)
+    account_number_normalized: Mapped[str] = mapped_column(String(100), index=True)
+    identity_scope: Mapped[str] = mapped_column(String(36), default="PERSONAL")
+    is_proprietary: Mapped[bool | None]
+    desk_id: Mapped[str | None] = mapped_column(ForeignKey("proprietary_desks.id"))
+    desk: Mapped[ProprietaryDesk | None] = relationship(lazy="selectin")
     original_name: Mapped[str] = mapped_column(String(160))
     nickname: Mapped[str | None] = mapped_column(String(120))
     initial_capital: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
     start_date: Mapped[date | None]
+    construction_win_fee: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    construction_wdo_fee: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    real_win_fee: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    real_wdo_fee: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
     is_new: Mapped[bool] = mapped_column(default=True)
     is_active: Mapped[bool] = mapped_column(default=True)
     first_seen_at: Mapped[datetime] = mapped_column(default=now)

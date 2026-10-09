@@ -9,23 +9,34 @@ export type User = {
   created_at: string;
 };
 export type Account = {
+  is_proprietary: boolean | null;
+  desk_id: string | null;
+  desk_name: string | null;
   id: string;
   account_number: string;
   original_name: string;
   nickname: string | null;
   initial_capital: string | null;
   start_date: string | null;
+  construction_win_fee: string | null;
+  construction_wdo_fee: string | null;
+  real_win_fee: string | null;
+  real_wdo_fee: string | null;
   is_new: boolean;
   is_active: boolean;
   status: "UNCONFIGURED" | "LOST" | "ACTIVE" | "INACTIVE";
   balance: string | null;
   risk_remaining: string | null;
+  gross_result: string;
+  fees: string | null;
   result: string;
   paid: string;
   return_pct: string | null;
   drawdown: string;
   drawdown_pct: string | null;
   lost_at: string | null;
+  fee_stage: "CONSTRUCTION" | "REAL" | null;
+  passed_at: string | null;
   trade_count: number;
   pending_months: string[];
   first_seen_at: string;
@@ -35,6 +46,8 @@ export type Account = {
 export type Summary = {
   capital: string;
   balance: string;
+  gross_result: string;
+  fees: string;
   result: string;
   paid: string;
   return_pct: string | null;
@@ -50,6 +63,8 @@ export type Dashboard = {
   evolution: { date: string; result: string; balance: string; paid: string }[];
   monthly: {
     month: string;
+    gross: string;
+    fees: string;
     calculated: string;
     confirmed: string;
     paid: string;
@@ -69,6 +84,8 @@ export type Batch = {
 export type Close = {
   id?: string;
   month: string;
+  gross_result: string;
+  fees: string;
   calculated_result: string;
   confirmed_result: string;
   opening_balance: string;
@@ -81,4 +98,19 @@ export type Close = {
   closed_at?: string;
 };
 export const accountName = (a: Account) =>
-  a.nickname || `Conta ${a.account_number}`;
+  a.desk_name ? `${a.desk_name} · Conta ${a.account_number}` : a.nickname || `Conta ${a.account_number}`;
+
+export type Desk = { id: string; name: string };
+export type AccountConfiguration = {
+  nickname: string | null;
+  initial_capital: string;
+  start_date: string;
+  construction_win_fee: string;
+  construction_wdo_fee: string;
+  real_win_fee: string;
+  real_wdo_fee: string;
+  is_proprietary: boolean;
+  desk_id: string | null;
+  new_desk_name: string | null;
+  is_active: boolean;
+};

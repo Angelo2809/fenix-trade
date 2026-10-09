@@ -40,23 +40,22 @@ Fluxo: CSV → validação → transação → PostgreSQL → API → dashboard.
 
 ## Requisitos
 
-Python 3.11+, Node.js 22 LTS recomendado, npm e PostgreSQL 17. Docker é opcional. Copie `.env.example` para `.env` na raiz; configure usuário, senha, banco e origens. As credenciais de exemplo são apenas locais. Nunca versione `.env`.
+Python 3.11+, Node.js 22 LTS recomendado, npm e MariaDB/MySQL do XAMPP para a execução local no Windows. PostgreSQL 17 continua disponível pela configuração Docker opcional. Copie `.env.example` para `.env` na raiz; configure usuário, senha, banco e origens. As credenciais de exemplo são apenas locais. Nunca versione `.env`.
 
 ## Sem Docker
 
-Instale PostgreSQL e crie o banco/usuário indicados em `DATABASE_URL`. Em Windows, use `127.0.0.1` na conexão para evitar espera por IPv6. O banco precisa existir antes da migração.
+No Windows, execute `tools\\Fenix Painel.bat`. A opção de preparação inicia o MySQL do XAMPP, cria o banco `fenix` e o usuário `fenix_local` com senha aleatória local, instala as dependências e aplica as migrations Alembic. A aplicação usa `127.0.0.1` para evitar espera por IPv6.
 
-PowerShell, a partir da raiz:
+Para execução manual, depois de preparar o banco pelo painel, use PowerShell a partir da raiz:
 
 ```powershell
-Copy-Item .env.example .env
 cd backend
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 alembic upgrade head
 python -m app.cli create-admin
-uvicorn app.main:app --reload --no-access-log
+uvicorn app.main:app --host 127.0.0.1 --port 8030 --reload --no-access-log
 ```
 
 Em Linux/macOS, ative com `source .venv/bin/activate`. A CLI solicita nome, e-mail e senha com confirmação, sem exibi-la. Senha permanente: 8 a 128 caracteres. Não existe credencial padrão.
@@ -65,11 +64,12 @@ Em outro terminal:
 
 ```sh
 cd frontend
-npm install
-npm run dev
+npm ci
+$env:BACKEND_URL="http://127.0.0.1:8030"
+npm run dev -- --hostname 127.0.0.1 --port 4300
 ```
 
-Abra **http://localhost:3000/login**. A API fica em `http://127.0.0.1:8000`; `/api/*` no frontend é encaminhado à API, mantendo cookies no mesmo domínio. Para outra API, defina `BACKEND_URL` no ambiente antes de iniciar/compilar o frontend. Para produção local: `npm run build` e `npm run start`.
+Abra **http://localhost:4300/login**. A API fica em `http://127.0.0.1:8030`; `/api/*` no frontend é encaminhado à API, mantendo cookies no mesmo domínio. Para outra API, defina `BACKEND_URL` no ambiente antes de iniciar/compilar o frontend. Para produção local: `npm run build` e `npm run start`.
 
 ## Docker Compose
 
@@ -89,13 +89,23 @@ docker compose stop
 
 Não use `docker compose down -v` se precisar preservar os dados. Para produção, configure proxy **HTTPS**, `COOKIE_SECURE=true`, `ENABLE_DOCS=false`, origens exatas e senha exclusiva do banco. A aplicação requer servidor Python e PostgreSQL; não é um site estático.
 
+### Painel Windows e Cloudflare Tunnel
+
+Em Windows, execute `tools\\Fenix Painel.bat`. O painel prepara o `.env`, inicia o MySQL do XAMPP quando necessário, cria e migra o banco MariaDB, sobe backend/frontend nativamente e pode iniciar o tunnel compartilhado da Selectto. A opção pública usa:
+
+- URL: `https://fenix.selectto.com.br`
+- origem do tunnel: `http://127.0.0.1:4300`
+- arquivo do cloudflared: `%USERPROFILE%\\.cloudflared\\config-selectto-finance.yml`
+
+O launcher `tools\\Projetos Selectto.bat` reúne Orbit, Angelera SaaS, Finance, HelpDrive e Fenix. Ele também pode ser copiado para a pasta `Projetos` ou para a Área de Trabalho.
+
 ## Primeiro uso
 
 1. Crie o ADMIN pela CLI e entre.
 2. Administração → Usuários: crie os convidados e compartilhe a senha temporária por canal privado. A senha expira em 24 horas por padrão.
 3. O convidado entra e obrigatoriamente cria a própria senha.
 4. Administração → Importação: envie o CSV de operações.
-5. No diálogo de conta nova, informe limite e início. Se houver várias, configure as demais em Contas e configurações.
+5. No diálogo de conta nova, informe limite, início e as quatro taxas por contrato (WIN/WDO na construção e na conta real). Se houver várias, configure as demais em Contas e configurações.
 6. Use o seletor ou os cartões para filtrar o dashboard. Apelidos persistem entre uploads.
 7. No mês seguinte, abra Fechamentos, confira o resultado, ajuste se necessário e confirme a baixa.
 8. No perfil, altere a senha, saia ou desconecte todos os dispositivos.

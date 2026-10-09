@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -30,17 +30,29 @@ export default function LoginPage() {
   const [show, setShow] = useState(false),
     [help, setHelp] = useState(false),
     [error, setError] = useState<unknown>(null),
-    [success, setSuccess] = useState(false);
+    [success, setSuccess] = useState(false),
+    [credentialsEnabled, setCredentialsEnabled] = useState(false);
   const router = useRouter(),
     client = useQueryClient();
   const {
     register,
+    reset,
     handleSubmit,
     formState: { errors, isSubmitting },
   } = useForm<z.infer<typeof schema>>({
     resolver: zodResolver(schema),
-    defaultValues: { remember: false },
+    defaultValues: { email: "", password: "", remember: false },
   });
+  useEffect(() => {
+    const clearCredentials = () => {
+      reset({ email: "", password: "", remember: false });
+      setShow(false);
+      setCredentialsEnabled(false);
+    };
+    clearCredentials();
+    window.addEventListener("pageshow", clearCredentials);
+    return () => window.removeEventListener("pageshow", clearCredentials);
+  }, [reset]);
   async function submit(values: z.infer<typeof schema>) {
     setError(null);
     try {
@@ -150,6 +162,9 @@ export default function LoginPage() {
               id="email"
               type="email"
               autoComplete="username"
+              readOnly={!credentialsEnabled}
+              onPointerDown={() => setCredentialsEnabled(true)}
+              onFocus={() => setCredentialsEnabled(true)}
               placeholder="Seu e-mail"
               {...register("email")}
               aria-invalid={!!errors.email}
@@ -167,6 +182,9 @@ export default function LoginPage() {
               id="password"
               type={show ? "text" : "password"}
               autoComplete="current-password"
+              readOnly={!credentialsEnabled}
+              onPointerDown={() => setCredentialsEnabled(true)}
+              onFocus={() => setCredentialsEnabled(true)}
               placeholder="Sua senha"
               {...register("password")}
               aria-invalid={!!errors.password}

@@ -5,14 +5,34 @@ test.beforeEach(async ({ page }) => {
   await page.route("**/api/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
     const user = { id: "motion-test", name: "Teste Visual", email: "motion@example.test", role: "ADMIN", is_active: true, must_change_password: false };
-    const accounts = Array.from({ length: 12 }, (_, i) => ({ id: String(i), account_number: String(i), nickname: `Mesa ${i + 1}`, status: "ACTIVE", initial_capital: "15000", balance: "15500", result: "500", paid: "0", return_pct: "3.33", drawdown: "0", pending_months: [], is_active: true }));
+    const accounts = Array.from({ length: 12 }, (_, i) => ({ id: String(i), account_number: String(i), nickname: `Mesa ${i + 1}`, status: "ACTIVE", initial_capital: "15000", balance: "15500", gross_result: "600", fees: "100", result: "500", paid: "0", return_pct: "3.33", drawdown: "0", pending_months: [], is_active: true, fee_stage: "CONSTRUCTION" }));
     const data = path === "/api/auth/login" ? { user, state: "OK" }
       : path === "/api/auth/me" ? user
       : path === "/api/accounts" ? accounts
-      : path === "/api/dashboard" ? { summary: { capital: "180000", balance: "186000", result: "6000", paid: "0", return_pct: "3.33", drawdown: "0", account_count: 12, unconfigured_count: 0 }, accounts, evolution: [], monthly: [] }
+      : path === "/api/dashboard" ? { summary: { capital: "180000", balance: "186000", gross_result: "7200", fees: "1200", result: "6000", paid: "0", return_pct: "3.33", drawdown: "0", account_count: 12, unconfigured_count: 0 }, accounts, evolution: [], monthly: [] }
       : null;
     await route.fulfill({ json: data });
   });
+});
+
+test("login credentials start empty and unlock only after interaction", async ({ page }) => {
+  await page.goto("/login");
+  const email = page.locator("#email"),
+    password = page.locator("#password");
+  await expect(email).toHaveValue("");
+  await expect(password).toHaveValue("");
+  await expect(email).toHaveAttribute("readonly", "");
+  await expect(password).toHaveAttribute("readonly", "");
+  await email.click();
+  await expect(email).not.toHaveAttribute("readonly", "");
+  await expect(password).not.toHaveAttribute("readonly", "");
+  await email.fill("saved@example.test");
+  await password.fill("saved-password");
+  await page.reload();
+  await expect(email).toHaveValue("");
+  await expect(password).toHaveValue("");
+  await expect(email).toHaveAttribute("readonly", "");
+  await expect(password).toHaveAttribute("readonly", "");
 });
 
 test("login transitions only after success and reveals cards on scroll", async ({ page }) => {

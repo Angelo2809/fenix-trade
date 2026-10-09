@@ -25,7 +25,7 @@ import {
   MonthlyChart,
 } from "@/components/charts";
 import { api, money, percent, dateLabel } from "@/lib/api";
-import { Account, Dashboard, Batch, User, accountName } from "@/lib/types";
+import { Account, Dashboard, Batch, User, Desk, accountName } from "@/lib/types";
 const statuses = {
   UNCONFIGURED: "Configuração pendente",
   LOST: "Limite atingido",
@@ -37,6 +37,8 @@ export default function DashboardPage() {
 }
 function Content({ user }: { user: User }) {
   const [accountId, setAccountId] = useState(""),
+    [deskId, setDeskId] = useState(""),
+    [accountNumber, setAccountNumber] = useState(""),
     [period, setPeriod] = useState("ALL"),
     [year, setYear] = useState(""),
     [editing, setEditing] = useState<Account | null>(null);
@@ -44,11 +46,13 @@ function Content({ user }: { user: User }) {
     queryKey: ["accounts"],
     queryFn: () => api<Account[]>("/accounts"),
   });
+  const desks = useQuery({ queryKey: ["desks"], queryFn: () => api<Desk[]>("/desks") });
+  const filteredAccounts = (all.data || []).filter(a => (!deskId || a.desk_id === deskId) && (!accountNumber || a.account_number === accountNumber));
   const query = useQuery({
-    queryKey: ["dashboard", accountId, period],
+    queryKey: ["dashboard", accountId, period, deskId, accountNumber],
     queryFn: () =>
       api<Dashboard>(
-        `/dashboard?period=${period}${accountId ? `&account_id=${accountId}` : ""}`,
+        `/dashboard?period=${period}${accountId ? `&account_id=${accountId}` : ""}${deskId ? `&desk_id=${deskId}` : ""}${accountNumber ? `&account_number=${encodeURIComponent(accountNumber)}` : ""}`,
       ),
   });
   const last = useQuery({
@@ -76,6 +80,16 @@ function Content({ user }: { user: User }) {
           <p>Acompanhe cada operação. Construa o próximo passo.</p>
         </div>
         <div className="account-select">
+          <label htmlFor="number-filter">NÚMERO DA CONTA</label>
+          <select id="number-filter" value={accountNumber} onChange={e => { setAccountNumber(e.target.value); setAccountId(""); }}>
+            <option value="">Todos os números</option>
+            {[...new Set(all.data?.map(a => a.account_number) || [])].map(n => <option key={n} value={n}>{n}</option>)}
+          </select>
+          <label htmlFor="desk-filter">MESA PROPRIETÁRIA</label>
+          <select id="desk-filter" value={deskId} onChange={e => { setDeskId(e.target.value); setAccountId(""); }}>
+            <option value="">Todas as mesas</option>
+            {desks.data?.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+          </select>
           <label htmlFor="account-filter">CONTA DE INVESTIMENTO</label>
           <select
             id="account-filter"
@@ -83,7 +97,7 @@ function Content({ user }: { user: User }) {
             onChange={(e) => setAccountId(e.target.value)}
           >
             <option value="">Todas as contas</option>
-            {all.data?.map((a) => (
+            {filteredAccounts.map((a) => (
               <option key={a.id} value={a.id}>
                 {accountName(a)}
                 {a.nickname ? ` · ${a.account_number}` : ""}
@@ -157,11 +171,23 @@ function Content({ user }: { user: User }) {
           <div className="kpi-grid">
             {[
               {
-                label: "RESULTADO ACUMULADO",
+                label: "RESULTADO LÍQUIDO",
                 value: money(summary.result),
-                foot: "Operações + ajustes confirmados",
+                foot: "Bruto − taxas + ajustes confirmados",
                 Icon: Coins,
                 accent: true,
+              },
+              {
+                label: "RESULTADO BRUTO",
+                value: money(summary.gross_result),
+                foot: "Lucro / prejuízo informado no CSV",
+                Icon: ChartNoAxesCombined,
+              },
+              {
+                label: "TAXAS OPERACIONAIS",
+                value: money(summary.fees),
+                foot: "Compra + venda por contrato executado",
+                Icon: Coins,
               },
               {
                 label: "LIMITES CONTRATADOS",
@@ -301,7 +327,9 @@ function Content({ user }: { user: User }) {
                           <thead>
                             <tr>
                               <th>Mês</th>
-                              <th>CSV</th>
+                              <th>Bruto CSV</th>
+                              <th>Taxas</th>
+                              <th>Líquido CSV</th>
                               <th>Confirmado</th>
                               <th>Repasse</th>
                             </tr>
@@ -310,6 +338,8 @@ function Content({ user }: { user: User }) {
                             {data!.monthly.map((m) => (
                               <tr key={m.month}>
                                 <td>{m.month}</td>
+                                <td>{money(m.gross)}</td>
+                                <td>{money(m.fees)}</td>
                                 <td>{money(m.calculated)}</td>
                                 <td>{money(m.confirmed)}</td>
                                 <td>{money(m.paid)}</td>
@@ -354,7 +384,7 @@ function Content({ user }: { user: User }) {
                             >
                               {money(a.result)}
                             </b>
-                            <small>resultado total</small>
+                            <small>resultado líquido</small>
                           </span>
                           <ArrowUpRight size={16} />
                         </button>
@@ -425,10 +455,10 @@ function Content({ user }: { user: User }) {
                   <span className="eyebrow">UMA VISÃO DE CADA MESA</span>
                   <h2>Desempenho por conta</h2>
                 </div>
-                <span>{all.data?.length || 0} contas</span>
+                <span>{filteredAccounts.length} cadastros</span>
               </div>
               <div className="accounts-grid">
-                {all.data?.map((a) => (
+                {filteredAccounts.map((a) => (
                   <button
                     className={`account-card panel ${accountId === a.id ? "chosen" : ""}`}
                     key={a.id}
@@ -446,8 +476,24 @@ function Content({ user }: { user: User }) {
                     <h3>{accountName(a)}</h3>
                     <small>Conta {a.account_number}</small>
                     <strong>{money(a.result)}</strong>
-                    <span className="hint">Resultado acumulado</span>
+                    <span className="hint">Resultado líquido acumulado</span>
                     <div className="account-stats">
+                      <span>
+                        Resultado bruto<b>{money(a.gross_result)}</b>
+                      </span>
+                      <span>
+                        Taxas operacionais<b>{money(a.fees)}</b>
+                      </span>
+                      <span>
+                        Faixa de taxas
+                        <b>
+                          {a.fee_stage === "REAL"
+                            ? "Conta real"
+                            : a.fee_stage === "CONSTRUCTION"
+                              ? "Construção"
+                              : "—"}
+                        </b>
+                      </span>
                       <span>
                         Limite contratado<b>{money(a.initial_capital)}</b>
                       </span>

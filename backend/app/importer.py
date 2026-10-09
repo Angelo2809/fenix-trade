@@ -76,7 +76,7 @@ def parse_csv(content: bytes) -> list[ParsedTrade]:
                 if not name or len(name) > 160:
                     raise ImportError(f"Linha {line}: titular inválido.")
                 continue
-            if label == "data" and header is None:
+            if label in {"data", "data inicial", "data final"} and header is None:
                 continue
             labels = [normalized(c) for c in row]
             if "ativo" in labels and "abertura" in labels:

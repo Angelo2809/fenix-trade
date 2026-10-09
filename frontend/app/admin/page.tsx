@@ -20,6 +20,7 @@ import {
 import { Shell } from "@/components/shell";
 import { Modal, Loading, ErrorNotice, Empty } from "@/components/ui";
 import { AccountForm } from "@/components/account-form";
+import { ImportDestinations, ImportAccount } from "@/components/import-destinations";
 import { api, post, dateLabel, money } from "@/lib/api";
 import { Account, Batch, User, accountName } from "@/lib/types";
 export default function AdminPage() {
@@ -290,6 +291,7 @@ function Admin({ user }: { user: User }) {
                 <thead>
                   <tr>
                     <th>Conta / apelido</th>
+                    <th>Mesa proprietária</th>
                     <th>Nome no relatório</th>
                     <th>Limite contratado</th>
                     <th>Início</th>
@@ -304,6 +306,7 @@ function Admin({ user }: { user: User }) {
                         <b>{accountName(a)}</b>
                         <small>Conta {a.account_number}</small>
                       </td>
+                      <td>{a.is_proprietary === null ? "Pendente" : a.is_proprietary ? a.desk_name : "Não · Conta própria"}</td>
                       <td>{a.original_name}</td>
                       <td>{money(a.initial_capital)}</td>
                       <td>{dateLabel(a.start_date)}</td>
@@ -472,6 +475,7 @@ function ImportSection({
   onNewAccount: (a: Account) => void;
   compact?: boolean;
 }) {
+  const [pending, setPending] = useState<{ file: File; accounts: ImportAccount[] } | null>(null);
   const [busy, setBusy] = useState(false),
     [error, setError] = useState<unknown>(null),
     [success, setSuccess] = useState<Batch | null>(null),
@@ -498,13 +502,11 @@ function ImportSection({
     const form = new FormData();
     form.append("file", file);
     try {
-      const result = await api<{ batch: Batch; new_accounts: Account[] }>(
-        "/imports/csv",
+      const result = await api<{ accounts: ImportAccount[] }>(
+        "/imports/preview",
         { method: "POST", body: form },
       );
-      setSuccess(result.batch);
-      await query.invalidateQueries();
-      if (result.new_accounts.length) onNewAccount(result.new_accounts[0]);
+      setPending({ file, accounts: result.accounts });
     } catch (e) {
       setError(e);
       await query.invalidateQueries({ queryKey: ["imports"] });
@@ -515,6 +517,12 @@ function ImportSection({
   }
   return (
     <div className={`import-grid ${compact ? "compact-import" : ""}`}>
+      {pending && <ImportDestinations file={pending.file} accounts={pending.accounts} onClose={() => setPending(null)} onImported={async result => {
+        setSuccess(result.batch);
+        await query.invalidateQueries();
+        const incomplete = result.new_accounts.find(a => a.status === "UNCONFIGURED");
+        if (incomplete) onNewAccount(incomplete);
+      }} />}
       <section className="panel">
         <div className="panel-heading">
           <div className="panel-title">

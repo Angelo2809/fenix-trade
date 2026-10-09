@@ -69,9 +69,15 @@ def test_closing_order_and_future_blocked(admin, account):
     assert close(admin, account, "2099-01-01", "0").status_code == 409
 
 
-def test_unconfigured_is_not_zero_capital(admin):
-    account = upload(admin).json()["new_accounts"][0]
+def test_unconfigured_is_not_zero_capital(admin, db):
+    from app.models import InvestmentAccount
+    legacy = InvestmentAccount(account_number="LEGACY", account_number_normalized="LEGACY", original_name="Legacy")
+    db.add(legacy)
+    db.commit()
+    account = admin.get(f"/api/accounts/{legacy.id}").json()
     assert account["initial_capital"] is None
+    assert account["construction_win_fee"] is None
+    assert account["real_wdo_fee"] is None
     assert account["balance"] is None
     assert account["status"] == "UNCONFIGURED"
     assert admin.get("/api/dashboard").json()["summary"]["return_pct"] is None
@@ -105,3 +111,44 @@ def test_intraday_drawdown_preserved(admin):
     summary = admin.get("/api/dashboard/summary").json()
     assert summary["drawdown"] == "200.00"
     assert summary["drawdown_pct"] == "-20.00"
+
+
+def test_fees_use_both_sides_net_threshold_and_latched_real_phase(admin):
+    account = upload(admin, report(results=["8,00", "8,00", "10,00", "-20,00", "10,00"])).json()["new_accounts"][0]["id"]
+    response = configure(
+        admin,
+        account,
+        capital="15.00",
+        construction_win_fee="0.50",
+        construction_wdo_fee="1.50",
+        real_win_fee="0.66",
+        real_wdo_fee="1.73",
+    )
+    assert response.status_code == 200
+    detail = response.json()
+    assert detail["gross_result"] == "16.00"
+    assert detail["fees"] == "5.64"
+    assert detail["result"] == "10.36"
+    assert detail["fee_stage"] == "REAL"
+    assert detail["passed_at"] == "2025-01-04"
+
+    preview = admin.get(f"/api/accounts/{account}/close-preview?month=2025-01-01").json()
+    assert preview["gross_result"] == "16.00"
+    assert preview["fees"] == "5.64"
+    assert preview["calculated_result"] == "10.36"
+
+
+def test_wdo_fee_is_charged_on_buy_and_sell_quantities(admin):
+    raw = report(results=["100,00"]).replace(b"WIN;", b"WDO;")
+    account = upload(admin, raw).json()["new_accounts"][0]["id"]
+    detail = configure(
+        admin,
+        account,
+        construction_win_fee="0.50",
+        construction_wdo_fee="1.50",
+        real_win_fee="0.66",
+        real_wdo_fee="1.73",
+    ).json()
+    assert detail["gross_result"] == "100.00"
+    assert detail["fees"] == "3.00"
+    assert detail["result"] == "97.00"

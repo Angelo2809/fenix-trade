@@ -14,4 +14,5 @@ backend/private_uploads/
 test-results/
 playwright-report/
 .local/
+.runtime/
 !**/.env.example

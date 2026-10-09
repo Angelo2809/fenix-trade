@@ -57,9 +57,9 @@ function Content({ user }: { user: User }) {
         </div>
         <div>
           <Info />
-          <strong>Calculado e confirmado</strong>
+          <strong>Bruto, taxas e líquido</strong>
           <p>
-            O resultado original permanece visível quando houver ajuste manual.
+            O resultado final desconta as taxas de cada contrato executado.
           </p>
         </div>
       </div>
@@ -150,7 +150,9 @@ function Content({ user }: { user: User }) {
                   <thead>
                     <tr>
                       <th>Mês</th>
-                      <th>Calculado (CSV)</th>
+                      <th>Bruto (CSV)</th>
+                      <th>Taxas</th>
+                      <th>Líquido calculado</th>
                       <th>Confirmado</th>
                       <th>Repasse 90%</th>
                       <th>Saldo seguinte</th>
@@ -161,6 +163,8 @@ function Content({ user }: { user: User }) {
                     {history.data.map((c) => (
                       <tr key={c.id}>
                         <td>{monthLabel(c.month)}</td>
+                        <td>{money(c.gross_result)}</td>
+                        <td>{money(c.fees)}</td>
                         <td>{money(c.calculated_result)}</td>
                         <td>{money(c.confirmed_result)}</td>
                         <td className="positive">{money(c.payout)}</td>
@@ -242,7 +246,13 @@ function CloseModal({
               Saldo anterior<b>{money(p.opening_balance)}</b>
             </span>
             <span>
-              Resultado calculado pelo CSV<b>{money(p.calculated_result)}</b>
+              Resultado bruto do CSV<b>{money(p.gross_result)}</b>
+            </span>
+            <span>
+              Taxas operacionais<b>{money(p.fees)}</b>
+            </span>
+            <span>
+              Resultado líquido calculado<b>{money(p.calculated_result)}</b>
             </span>
           </div>
           <label>

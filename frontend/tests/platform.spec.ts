@@ -32,29 +32,32 @@ test("private platform lifecycle, import, settlement and responsive views", asyn
     .locator('input[type="file"]')
     .setInputFiles(path.join(local, "browser-report.csv"));
   await expect(page.getByRole("dialog")).toBeVisible();
-  await page.getByLabel("Apelido da conta").fill("Fenix Principal");
-  await page.getByLabel("Capital inicial / limite de perda (R$)").fill("15000");
-  await page.getByLabel("Data de início", { exact: true }).fill("2026-01-01");
-  await page.getByRole("button", { name: "Salvar configuração" }).click();
-  await expect(page.getByRole("dialog")).toHaveCount(0);
-  await page.getByRole("tab", { name: /Contas e configurações/ }).click();
   for (const [number, nickname, capital] of [
+    ["DEMO001", "Fenix Principal", "15000"],
     ["DEMO002", "Fenix Expansão", "20000"],
     ["DEMO003", "Fenix Alpha", "10000"],
   ]) {
     await page
-      .getByRole("row")
+      .locator("fieldset")
       .filter({ hasText: number })
-      .getByRole("button", { name: "Configurar" })
+      .getByRole("button", { name: "Configurar novo destino" })
       .click();
+    await page.getByRole("radio", { name: "Sim", exact: true }).check();
+    await page.getByLabel("Nova mesa proprietária", { exact: true }).check();
+    await page.getByLabel("Nome da nova mesa proprietária").fill(nickname);
     await page.getByLabel("Apelido da conta").fill(nickname);
     await page
       .getByLabel("Capital inicial / limite de perda (R$)")
       .fill(capital);
     await page.getByLabel("Data de início", { exact: true }).fill("2026-01-01");
-    await page.getByRole("button", { name: "Salvar configuração" }).click();
-    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await page.getByLabel("Construção de margem · WIN").fill("0.50");
+    await page.getByLabel("Construção de margem · WDO").fill("1.50");
+    await page.getByLabel("Conta real · WIN").fill("0.66");
+    await page.getByLabel("Conta real · WDO").fill("1.73");
+    await page.getByRole("button", { name: "Confirmar configuração" }).click();
   }
+  await page.getByRole("button", { name: "Confirmar destino e importar" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   await page.getByRole("tab", { name: "Usuários", exact: true }).click();
   await page.getByRole("button", { name: "Adicionar usuário" }).click();
   const partnerEmail = `browser-partner-${Date.now()}@example.com`;
@@ -114,6 +117,12 @@ test("private platform lifecycle, import, settlement and responsive views", asyn
   await page.getByRole("button", { name: "Sair desta sessão" }).click();
   await expect(page).toHaveURL(/login/);
   await expect(page.locator(".login-card")).toHaveCSS("opacity", "1");
+  await expect(page.getByLabel("E-mail", { exact: true })).toHaveValue("");
+  await expect(page.getByLabel("Senha", { exact: true })).toHaveValue("");
+  await expect(page.getByLabel("E-mail", { exact: true })).toHaveAttribute("readonly", "");
+  await page.getByLabel("E-mail", { exact: true }).click();
+  await expect(page.getByLabel("E-mail", { exact: true })).not.toHaveAttribute("readonly", "");
+  await expect(page.getByLabel("Senha", { exact: true })).not.toHaveAttribute("readonly", "");
   await page.screenshot({ path: path.join(local, "login-mobile.png") });
   await page.getByLabel("E-mail", { exact: true }).fill(partnerEmail);
   await page.getByLabel("Senha", { exact: true }).fill(temporary);

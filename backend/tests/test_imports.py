@@ -76,6 +76,13 @@ def test_header_not_row_one_and_column_order():
     assert len(parse_csv("\n".join(rows).encode())) == 2
 
 
+def test_date_range_and_subaccount_report():
+    raw = report().decode("cp1252")
+    raw = raw.replace("Data: 01/01/2025", "Data Inicial: 01/01/2025\r\nData Final: 31/01/2025")
+    raw = raw.replace("Ativo;Abertura;", "Subconta;Ativo;Abertura;").replace("\r\nWIN;", "\r\n - ;WIN;")
+    assert len(parse_csv(raw.encode("cp1252"))) == 2
+
+
 def test_partner_cannot_import_or_configure(admin, account, db):
     from app.models import User
     from app.security import hasher

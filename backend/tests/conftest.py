@@ -70,12 +70,54 @@ def report(number="001234", name="Test Owner", results=None, month="2025-01"):
     return "\r\n".join(content).encode("cp1252")
 
 
-def upload(client, raw=None, filename="report.csv", mime="text/csv"):
-    return client.post("/api/imports/csv", files={"file": (filename, raw or report(), mime)})
+def upload(client, raw=None, filename="report.csv", mime="text/csv", destinations=None):
+    import json
+    from app.importer import parse_csv, normalize_account, ImportError
+    raw = raw or report()
+    if destinations is None:
+        destinations = {}
+        try:
+            existing = client.get("/api/accounts").json()
+            for trade in parse_csv(raw):
+                number = normalize_account(trade.account_number)
+                match = next((a for a in existing if normalize_account(a["account_number"]) == number), None) if isinstance(existing, list) else None
+                destinations[number] = {"account_id": match["id"]} if match else {"configuration": {
+                    "is_proprietary": True, "new_desk_name": f"Test desk {number}",
+                    "initial_capital": "15000.00", "start_date": "2025-01-01",
+                    "construction_win_fee": "0.00", "construction_wdo_fee": "0.00",
+                    "real_win_fee": "0.00", "real_wdo_fee": "0.00",
+                }}
+        except ImportError:
+            pass
+    return client.post("/api/imports/csv", data={"destinations": json.dumps(destinations)}, files={"file": (filename, raw, mime)})
 
 
-def configure(client, account_id, capital="15000.00", start="2025-01-01", nickname="Principal"):
-    return client.patch(f"/api/accounts/{account_id}", json={"initial_capital": capital, "start_date": start, "nickname": nickname})
+def configure(
+    client,
+    account_id,
+    capital="15000.00",
+    start="2025-01-01",
+    nickname="Principal",
+    construction_win_fee="0.00",
+    construction_wdo_fee="0.00",
+    real_win_fee="0.00",
+    real_wdo_fee="0.00",
+):
+    existing = client.get(f"/api/accounts/{account_id}").json()
+    return client.patch(
+        f"/api/accounts/{account_id}",
+        json={
+            "is_proprietary": existing.get("is_proprietary", True),
+            "desk_id": existing.get("desk_id"),
+            "initial_capital": capital,
+            "start_date": start,
+            "nickname": nickname,
+            "construction_win_fee": construction_win_fee,
+            "construction_wdo_fee": construction_wdo_fee,
+            "real_win_fee": real_win_fee,
+            "real_wdo_fee": real_wdo_fee,
+        },
+    )
 
 
 @pytest.fixture

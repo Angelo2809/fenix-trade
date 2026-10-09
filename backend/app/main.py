@@ -7,7 +7,8 @@ from dataclasses import asdict
 from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
-from fastapi import FastAPI, Depends, HTTPException, Request, Response, UploadFile, File
+from fastapi import FastAPI, Depends, HTTPException, Request, Response, UploadFile, File, Form
+from pydantic import ValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import select, func, delete, text
@@ -16,11 +17,12 @@ from sqlalchemy.orm import Session as DBSession
 from .config import settings
 from .limits import BodyLimitMiddleware
 from .db import get_db
-from .models import User, Session, LoginAttempt, AuditLog, InvestmentAccount, ImportBatch, Trade, MonthlyClose, now
+from .models import User, Session, LoginAttempt, AuditLog, InvestmentAccount, ProprietaryDesk, ImportBatch, Trade, MonthlyClose, now
+from .account_config import configure_account
 from .schemas import LoginIn, PasswordIn, UserCreate, UserEdit, AccountEdit, CloseIn
 from .security import authenticated, current_user, require_admin, audit, hasher, verify, DUMMY_HASH, issue_session, clear_cookies, revoke
 from .importer import parse_csv, normalize_account, ImportError
-from .finance import account_summary, dashboard, account_rows, pending_months, close_preview, month_start, today
+from .finance import FEE_FIELDS, account_configured, account_summary, dashboard, account_rows, pending_months, close_preview, month_start, today
 
 cfg = settings()
 app = FastAPI(
@@ -282,6 +284,11 @@ def accounts(user: User = Depends(current_user), db: DBSession = Depends(get_db)
     return [account_summary(db, a) for a in db.scalars(select(InvestmentAccount).order_by(InvestmentAccount.first_seen_at))]
 
 
+@app.get("/api/desks")
+def desks(user: User = Depends(current_user), db: DBSession = Depends(get_db)):
+    return [{"id": d.id, "name": d.name} for d in db.scalars(select(ProprietaryDesk).order_by(ProprietaryDesk.name))]
+
+
 @app.get("/api/accounts/{account_id}")
 def account_detail(account_id: str, user: User = Depends(current_user), db: DBSession = Depends(get_db)):
     return account_summary(db, get_account(db, account_id))
@@ -292,16 +299,20 @@ def edit_account(
     account_id: str, body: AccountEdit, request: Request, user: User = Depends(require_admin), db: DBSession = Depends(get_db)
 ):
     account = get_account(db, account_id, lock=True)
-    if body.initial_capital is None or body.start_date is None:
-        raise HTTPException(400, "Informe o limite de perda e a data de início.")
+    if body.initial_capital is None or body.start_date is None or any(getattr(body, field) is None for field in FEE_FIELDS):
+        raise HTTPException(400, "Informe o limite de perda, a data de início e as quatro taxas por contrato.")
     if not date(2000, 1, 1) <= body.start_date <= today():
         raise HTTPException(400, "A data de início deve estar entre 01/01/2000 e hoje.")
     has_closes = db.scalar(select(MonthlyClose.id).where(MonthlyClose.account_id == account_id).limit(1))
-    if has_closes and (account.initial_capital != body.initial_capital or account.start_date != body.start_date):
-        raise HTTPException(409, "Limite e início não podem mudar após o primeiro fechamento.")
-    for k, v in body.model_dump().items():
-        setattr(account, k, v.strip() or None if k == "nickname" and v else v)
-    account.is_new = False
+    protected = ("initial_capital", "start_date", *FEE_FIELDS)
+    if has_closes and any(getattr(account, field) != getattr(body, field) for field in protected):
+        raise HTTPException(409, "Limite, início e taxas não podem mudar após o primeiro fechamento.")
+    try:
+        configure_account(db, account, body)
+        db.flush()
+    except (ImportError, IntegrityError) as exc:
+        db.rollback()
+        raise HTTPException(409, str(exc) if isinstance(exc, ImportError) else "Já existe uma conta vinculada a esta mesa.") from None
     audit(
         db,
         request,
@@ -310,25 +321,29 @@ def edit_account(
         account_id=account.id,
         initial_capital=str(body.initial_capital),
         start_date=body.start_date.isoformat(),
+        **{field: str(getattr(body, field)) for field in FEE_FIELDS},
     )
     audit(db, request, "ACCOUNT_NICKNAME_UPDATED", user.id, account_id=account.id)
     db.commit()
     return account_summary(db, account)
 
 
-def selected_accounts(db, account_id):
+def selected_accounts(db, account_id, desk_id=None, account_number=None):
     return (
         [get_account(db, account_id)]
         if account_id
-        else list(db.scalars(select(InvestmentAccount).order_by(InvestmentAccount.first_seen_at)))
+        else list(db.scalars(select(InvestmentAccount).where(
+            *([InvestmentAccount.desk_id == desk_id] if desk_id else []),
+            *([InvestmentAccount.account_number_normalized == normalize_account(account_number)] if account_number else []),
+        ).order_by(InvestmentAccount.first_seen_at)))
     )
 
 
 @app.get("/api/dashboard")
-def full_dashboard(account_id: str | None = None, period: str = "ALL", user: User = Depends(current_user), db: DBSession = Depends(get_db)):
+def full_dashboard(account_id: str | None = None, period: str = "ALL", desk_id: str | None = None, account_number: str | None = None, user: User = Depends(current_user), db: DBSession = Depends(get_db)):
     if period not in ("ALL", "1M", "3M", "6M", "1A", "2A"):
         raise HTTPException(422, "Período inválido.")
-    return dashboard(db, selected_accounts(db, account_id), period)
+    return dashboard(db, selected_accounts(db, account_id, desk_id, account_number), period)
 
 
 @app.get("/api/dashboard/{section}")
@@ -347,10 +362,10 @@ def dashboard_section(
 @app.get("/api/accounts/{account_id}/closes")
 def closes(account_id: str, user: User = Depends(current_user), db: DBSession = Depends(get_db)):
     account = get_account(db, account_id)
-    return [close_public(c) for c in account_rows(db, account)[1]]
+    return [close_public(c, close_preview(db, account, c.month)) for c in account_rows(db, account)[1]]
 
 
-def close_public(record):
+def close_public(record, calculation=None):
     fields = (
         "id",
         "account_id",
@@ -365,13 +380,16 @@ def close_public(record):
         "note",
         "closed_at",
     )
-    return {k: str(getattr(record, k)) if isinstance(getattr(record, k), Decimal) else getattr(record, k) for k in fields}
+    result = {k: str(getattr(record, k)) if isinstance(getattr(record, k), Decimal) else getattr(record, k) for k in fields}
+    if calculation:
+        result.update({k: calculation[k] for k in ("gross_result", "fees")})
+    return result
 
 
 @app.get("/api/accounts/{account_id}/close-preview")
 def preview(account_id: str, month: date, user: User = Depends(require_admin), db: DBSession = Depends(get_db)):
     account = get_account(db, account_id)
-    if not account.initial_capital or not account.start_date:
+    if not account_configured(account):
         raise HTTPException(400, "Configure esta conta primeiro.")
     pending = pending_months(account, account_rows(db, account)[1])
     if not pending or month != pending[0]:
@@ -382,7 +400,7 @@ def preview(account_id: str, month: date, user: User = Depends(require_admin), d
 @app.post("/api/accounts/{account_id}/closes", status_code=201)
 def close_month(account_id: str, body: CloseIn, request: Request, user: User = Depends(require_admin), db: DBSession = Depends(get_db)):
     account = get_account(db, account_id, lock=True)
-    if not account.initial_capital or not account.start_date:
+    if not account_configured(account):
         raise HTTPException(400, "Configure esta conta primeiro.")
     pending = pending_months(account, account_rows(db, account)[1])
     if not pending or body.month != pending[0]:
@@ -390,6 +408,7 @@ def close_month(account_id: str, body: CloseIn, request: Request, user: User = D
     values = close_preview(db, account, body.month, body.confirmed_result)
     if Decimal(values["calculated_result"]) != body.confirmed_result and len(body.note.strip()) < 5:
         raise HTTPException(422, "Explique o ajuste manual (mínimo de 5 caracteres).")
+    calculation = {key: values.pop(key) for key in ("gross_result", "fees")}
     values.pop("lost")
     record = MonthlyClose(account_id=account_id, closed_by=user.id, note=body.note.strip(), **values)
     db.add(record)
@@ -402,10 +421,11 @@ def close_month(account_id: str, body: CloseIn, request: Request, user: User = D
         month=body.month.isoformat(),
         calculated_result=values["calculated_result"],
         confirmed_result=values["confirmed_result"],
+        fees=calculation["fees"],
         payout=values["payout"],
     )
     db.commit()
-    return close_public(record)
+    return close_public(record, calculation)
 
 
 def batch_public(batch):
@@ -436,8 +456,32 @@ def latest_import(user: User = Depends(current_user), db: DBSession = Depends(ge
     return batch_public(batch) if batch else None
 
 
+@app.post("/api/imports/preview")
+async def preview_import(file: UploadFile = File(...), user: User = Depends(require_admin), db: DBSession = Depends(get_db)):
+    raw = await file.read(cfg.max_upload_size_mb * 1024 * 1024 + 1)
+    await file.close()
+    if len(raw) > cfg.max_upload_size_mb * 1024 * 1024:
+        raise HTTPException(413, "Arquivo excede o tamanho permitido.")
+    if not (file.filename or "").lower().endswith(".csv"):
+        raise HTTPException(422, "Envie um arquivo CSV.")
+    try:
+        parsed = parse_csv(raw)
+    except ImportError as exc:
+        raise HTTPException(422, str(exc)) from None
+    result = []
+    for number in sorted({normalize_account(t.account_number) for t in parsed}):
+        rows = [t for t in parsed if normalize_account(t.account_number) == number]
+        candidates = db.scalars(select(InvestmentAccount).where(InvestmentAccount.account_number_normalized == number))
+        result.append({
+            "number": number, "account_number": rows[0].account_number, "original_name": rows[0].original_name,
+            "first_trade_date": min(t.closed_at.date() for t in rows), "trade_count": len(rows),
+            "accounts": [account_summary(db, a) for a in candidates],
+        })
+    return {"accounts": result}
+
+
 @app.post("/api/imports/csv")
-async def import_csv(request: Request, file: UploadFile = File(...), user: User = Depends(require_admin), db: DBSession = Depends(get_db)):
+async def import_csv(request: Request, file: UploadFile = File(...), destinations: str = Form("{}"), user: User = Depends(require_admin), db: DBSession = Depends(get_db)):
     filename = (file.filename or "relatorio.csv").replace("\\", "/").split("/")[-1][:255]
     raw = await file.read(cfg.max_upload_size_mb * 1024 * 1024 + 1)
     await file.close()
@@ -465,6 +509,12 @@ async def import_csv(request: Request, file: UploadFile = File(...), user: User 
         ):
             raise ImportError("Formato inválido. Envie um arquivo .csv.")
         parsed = parse_csv(raw)
+        try:
+            choices = json.loads(destinations)
+            if not isinstance(choices, dict) or set(choices) != {normalize_account(t.account_number) for t in parsed}:
+                raise ValueError()
+        except (ValueError, TypeError):
+            raise ImportError("Confirme o destino de cada conta antes de importar o relatório.") from None
         total = len(parsed)
         batch.rows_total = len(parsed)
         directory = Path(cfg.upload_dir)
@@ -476,11 +526,26 @@ async def import_csv(request: Request, file: UploadFile = File(...), user: User 
         # Lock accounts in consistent order, serializing imports and monthly closes.
         for number in sorted({normalize_account(t.account_number) for t in parsed}):
             sample = next(t for t in parsed if normalize_account(t.account_number) == number)
-            account = db.scalar(select(InvestmentAccount).where(InvestmentAccount.account_number_normalized == number).with_for_update())
-            if not account:
+            choice = choices[number]
+            if not isinstance(choice, dict) or set(choice) not in ({"account_id"}, {"configuration"}):
+                raise ImportError("Destino de importação inválido.")
+            if "account_id" in choice:
+                if not isinstance(choice["account_id"], str) or not choice["account_id"]:
+                    raise ImportError("Selecione um cadastro válido para o relatório.")
+                account = db.scalar(select(InvestmentAccount).where(InvestmentAccount.id == choice["account_id"]).with_for_update())
+                if not account or account.account_number_normalized != number:
+                    raise ImportError("A conta selecionada não corresponde ao número do relatório.")
+                if not account_configured(account):
+                    raise ImportError("Conclua a configuração da conta selecionada antes de importar.")
+            else:
+                try:
+                    configuration = AccountEdit.model_validate(choice.get("configuration", {}))
+                except ValidationError:
+                    raise ImportError("Preencha toda a configuração e escolha Sim ou Não para mesa proprietária.") from None
                 account = InvestmentAccount(
-                    account_number=sample.account_number, account_number_normalized=number, original_name=sample.original_name
+                    id=str(uuid.uuid4()), account_number=sample.account_number, account_number_normalized=number, original_name=sample.original_name
                 )
+                configure_account(db, account, configuration)
                 db.add(account)
                 db.flush()
                 new_ids.append(account.id)
@@ -510,7 +575,8 @@ async def import_csv(request: Request, file: UploadFile = File(...), user: User 
             db.add(Trade(account_id=account.id, import_id=batch_id, **data))
             batch.rows_imported += 1
         batch.status = "SUCCESS"
-        audit(db, request, "CSV_UPLOAD_SUCCESS", user.id, import_id=batch_id, rows=batch.rows_imported)
+        audit(db, request, "CSV_UPLOAD_SUCCESS", user.id, import_id=batch_id, rows=batch.rows_imported,
+              destinations={number: account.id for number, account in account_cache.items()})
         db.commit()
         return {"batch": batch_public(batch), "new_accounts": [account_summary(db, db.get(InvestmentAccount, i)) for i in new_ids]}
     except (ImportError, IntegrityError, OSError):

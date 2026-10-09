@@ -33,9 +33,16 @@ class UserEdit(UserCreate):
 
 
 class AccountEdit(BaseModel):
+    is_proprietary: bool
+    desk_id: str | None = Field(default=None, max_length=36)
+    new_desk_name: str | None = Field(default=None, min_length=1, max_length=120)
     nickname: str | None = Field(default=None, max_length=120)
     initial_capital: Decimal | None = Field(default=None, gt=0, le=Decimal("999999999999.99"), decimal_places=2)
     start_date: date | None = None
+    construction_win_fee: Decimal | None = Field(default=None, ge=0, le=Decimal("99999999.99"), decimal_places=2)
+    construction_wdo_fee: Decimal | None = Field(default=None, ge=0, le=Decimal("99999999.99"), decimal_places=2)
+    real_win_fee: Decimal | None = Field(default=None, ge=0, le=Decimal("99999999.99"), decimal_places=2)
+    real_wdo_fee: Decimal | None = Field(default=None, ge=0, le=Decimal("99999999.99"), decimal_places=2)
     is_active: bool = True
 
 
